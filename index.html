@@ -1686,7 +1686,7 @@
         <div class="form-grid">
           <div class="form-field full">
             <label>Agent name <span class="req-star">*</span></label>
-            <input type="text" id="ptoName" list="agentList" placeholder="Start typing — known agents autofill their team details" autocomplete="off">
+            <input type="text" id="ptoName" list="agentList" placeholder="Type a NAME or EID — details and email autofill from the roster" autocomplete="off">
             <datalist id="agentList"></datalist>
             <span class="hint" id="ptoAutofillHint"></span>
           </div>
@@ -1924,8 +1924,8 @@ let LEAVE_DATA = /*__LEAVE_DATA__*/[];
    ╚══════════════════════════════════════════════════════════════════╝ */
 
 const SUPABASE_CONFIG = {
-  url:     "https://rwlvfybgxdtifzcasbpz.supabase.co",   // ← STEP 2: Project URL, e.g. "https://abcdefgh.supabase.co"
-  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3bHZmeWJneGR0aWZ6Y2FzYnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzODI2MzQsImV4cCI6MjA5OTk1ODYzNH0.8nAwFalcKpbHkAhkVJIGSo-e7M10CgsQZuKsJ2pLEjE",   // ← STEP 2: anon public key (the long eyJ... string)
+  url:     "https://wixwgacossifyvjdkcex.supabase.co",   // ← STEP 2: Project URL, e.g. "https://abcdefgh.supabase.co"
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpeHdnYWNvc3NpZnl2amRrY2V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0MDA3MDEsImV4cCI6MjA5OTk3NjcwMX0.HJ0VZeBG_zn0dVweMXCRrlY-18WWqWT2j7JqyOGzRI4",   // ← STEP 2: anon public key (the long eyJ... string)
   table: "leave_requests"        // (leave as-is)
 };
 /* ================================================================
@@ -1939,7 +1939,7 @@ const SUPABASE_CONFIG = {
 const ADMIN_ACCESS = {
   portalPassword: "wfm2026",   // ← the ONE team login password (changeable later in Settings)
   cloudEmail: "",              // leave blank — the no-email team login is used (STEP 3 toggle)
-  cloudPassword: ""            // (only fill these if you ever want a dedicated service account instead)
+  cloudPassword: ""            // (fill only if you ever prefer a dedicated service account)
 };
 /* ══════════════════════ END OF EDITABLE SECTION ══════════════════════ */
 /* Password is never stored readable: a deterministic hash is kept instead.
@@ -3494,24 +3494,43 @@ function downloadTemplateXlsx(){
 /* ============================= PTO FILING ============================= */
 let SESSION_FILINGS = [];
 
+/* ROSTER: the uploaded active list, incl. emails — the canonical directory.
+   Stored in the cloud (portal_settings key 'roster') so every device shares it. */
+let ROSTER = [];
+
 function buildAgentDirectory(){
-  // Latest known org details per agent, keyed by lowercase name
   const dir = {};
+  // 1) Roster is canonical: names, EIDs, emails, org fields
+  (ROSTER || []).forEach(r=>{
+    if(!r || !r.name) return;
+    dir[String(r.name).toLowerCase()] = Object.assign({}, r);
+  });
+  // 2) Request history fills gaps and covers agents not on the roster yet
   LEAVE_DATA.slice().sort((a,b)=>(a.loggedDate||'').localeCompare(b.loggedDate||'')).forEach(d=>{
     if(!d.name) return;
-    dir[d.name.toLowerCase()] = {
-      name:d.name, eid:d.eid, lob:d.lob, subLob:d.subLob, site:d.site,
-      channel:d.channel, teamLeader:d.teamLeader, supervisor:d.supervisor, manager:d.manager
-    };
+    const key = d.name.toLowerCase();
+    const hist = { name:d.name, eid:d.eid, lob:d.lob, subLob:d.subLob, site:d.site,
+      channel:d.channel, teamLeader:d.teamLeader, supervisor:d.supervisor, manager:d.manager };
+    if(!dir[key]) dir[key] = hist;
+    else Object.keys(hist).forEach(k=>{ if(dir[key][k]===undefined || dir[key][k]===null || dir[key][k]==='') dir[key][k]=hist[k]; });
   });
   return dir;
 }
 let AGENT_DIR = {};
+let AGENT_EID_DIR = {};
 
 function refreshAgentList(){
   AGENT_DIR = buildAgentDirectory();
-  const names = Object.values(AGENT_DIR).map(a=>a.name).sort();
-  document.getElementById('agentList').innerHTML = names.map(n=>`<option value="${escapeHtml(n)}">`).join('');
+  AGENT_EID_DIR = {};
+  Object.values(AGENT_DIR).forEach(a=>{ if(a.eid!==undefined && a.eid!==null && a.eid!=='') AGENT_EID_DIR[String(a.eid).trim()] = a; });
+  const agents = Object.values(AGENT_DIR).sort((a,b)=>a.name.localeCompare(b.name));
+  const opts = [];
+  agents.forEach(a=>{
+    const meta = [a.eid, a.lob].filter(Boolean).join(' · ');
+    opts.push(`<option value="${escapeHtml(a.name)}">${escapeHtml(meta)}</option>`);
+    if(a.eid!==undefined && a.eid!==null && a.eid!=='') opts.push(`<option value="${escapeHtml(String(a.eid))}">${escapeHtml(a.name)}</option>`);
+  });
+  document.getElementById('agentList').innerHTML = opts.join('');
 }
 
 function openPtoModal(){
@@ -3535,20 +3554,25 @@ function resetPtoForm(){
 }
 
 function ptoAutofill(){
-  const name = document.getElementById('ptoName').value.trim().toLowerCase();
-  const hit = AGENT_DIR[name];
+  const raw = document.getElementById('ptoName').value.trim();
+  let hit = AGENT_DIR[raw.toLowerCase()] || AGENT_EID_DIR[raw];
   const hint = document.getElementById('ptoAutofillHint');
   if(!hit){ hint.textContent=''; return; }
+  // Picked by EID? Swap the visible field to the agent's actual name
+  if(!AGENT_DIR[raw.toLowerCase()]) document.getElementById('ptoName').value = hit.name;
   document.getElementById('ptoEid').value = hit.eid ?? '';
   if(hit.lob) document.getElementById('ptoLob').value = hit.lob;
   document.getElementById('ptoSubLob').value = hit.subLob || '';
   if(hit.site) document.getElementById('ptoSite').value = hit.site;
   document.getElementById('ptoChannel').value = hit.channel || '';
   document.getElementById('ptoTl').value = hit.teamLeader || '';
+  const emailEl = document.getElementById('ptoEmail');
+  if(hit.email && !emailEl.value) emailEl.value = hit.email;
   if(isInactive(hit.eid)){
     hint.textContent = '\u26A0 This agent is marked INACTIVE — the RTA team will see a flag on this request.';
   } else {
-    hint.textContent = 'Known agent — team details autofilled from history. Edit anything that changed.';
+    hint.textContent = 'Known agent — details autofilled from the roster' +
+      (hit.email ? ' (decision emails go to ' + hit.email + ').' : '. No email on the roster — add one to get the decision.');
   }
 }
 
@@ -3739,9 +3763,14 @@ function downloadFilingsCsv(){
 
 /* ============================= CLOUD (SUPABASE) ============================= */
 const SETUP_SQL = `-- ============================================================
--- Caliber Leave & PTO Portal — Supabase setup (v2)
+-- Caliber Leave & PTO Portal — Supabase setup (v3)
 -- Paste the WHOLE script into SQL Editor and Run.
 -- Fully re-runnable: safe to execute again any time.
+--
+-- AFTER RUNNING THIS, ONE TOGGLE (no users, no emails):
+--   Authentication -> Sign In / Providers -> "Anonymous" -> ON
+-- That single switch is what lets the shared team password
+-- unlock cloud saves. Nothing else to create.
 -- ============================================================
 
 -- ===================== 1. LEAVE REQUESTS =====================
@@ -3862,9 +3891,15 @@ where schemaname = 'public'
 order by tablename, policyname;
 
 -- ============================================================
--- REMINDER (not SQL): admin saves also need the shared login —
--- Authentication -> Users -> Add user (Auto Confirm ON), then put
--- that email/password into ADMIN_ACCESS in index.html.
+-- REMINDER (not SQL):
+-- 1) Toggle ON: Authentication -> Sign In / Providers -> Anonymous.
+--    The portal signs in silently after the team password check —
+--    no user accounts, no emails.
+-- 2) The roster (with agent emails) is stored by the portal itself
+--    in portal_settings under key 'roster' — no extra table needed.
+-- 3) Optional alternative: a dedicated service user (Auth -> Users,
+--    Auto Confirm ON) whose login goes into ADMIN_ACCESS — only if
+--    you ever want to disable Anonymous sign-ins.
 -- ============================================================`;
 
 function isAdmin(){ return !!CLOUD.user || CLOUD.demoAdmin; }
@@ -4982,10 +5017,15 @@ function refreshPtoLobOptions(){
 async function fetchCapsAndSettings(){
   if(!CLOUD.enabled) return;
   try{
-    const [capsRes, setRes] = await Promise.all([
+    const [capsRes, setRes, rosRes] = await Promise.all([
       CLOUD.client.from('allocation_caps').select('*'),
       CLOUD.client.from('portal_settings').select('*').eq('key','main').maybeSingle(),
+      CLOUD.client.from('portal_settings').select('*').eq('key','roster').maybeSingle(),
     ]);
+    if(rosRes && !rosRes.error && rosRes.data && Array.isArray(rosRes.data.value)){
+      ROSTER = rosRes.data.value;
+      refreshAgentList();
+    }
     if(!capsRes.error && capsRes.data){
       ALLOC_CAPS = {};
       capsRes.data.forEach(r=>{ ALLOC_CAPS[r.date + '|' + r.lob] = r.cap; });
@@ -5318,6 +5358,7 @@ function buildBackupObject(){
     exportedBy: adminName(),
     settings: SETTINGS,
     allocCaps: ALLOC_CAPS,
+    roster: ROSTER,
     requests: LEAVE_DATA,
   };
 }
@@ -5373,9 +5414,10 @@ async function dmRestore(file){
       Object.assign(LOB_COLORS, SETTINGS.lobColors || {});
       refreshPtoLobOptions();
     }
+    if(Array.isArray(obj.roster)) ROSTER = obj.roster;
     SESSION_FILINGS = [];
     refreshMeta(); rebuildFilters(); refreshAgentList(); renderAll();
-    dmSay('Backup restored locally — ' + LEAVE_DATA.length + ' requests loaded.', 'var(--green)');
+    dmSay('Backup restored locally — ' + LEAVE_DATA.length + ' requests loaded' + (Array.isArray(obj.roster)? (' · roster: ' + ROSTER.length + ' agents') : '') + '.', 'var(--green)');
     if(CLOUD.enabled && !CLOUD.user){
       dmSay('Restored on this device ONLY — the cloud was NOT touched because there is no signed-in cloud session. ' +
             'Fix the shared login in ADMIN_ACCESS (or run Cloud diagnostics below), sign in again, then restore once more.', 'var(--amber)');
@@ -5395,6 +5437,7 @@ async function dmRestore(file){
           await CLOUD.client.from('allocation_caps').upsert(capRows.slice(i,i+500), {onConflict:'date,lob'});
         }
         await CLOUD.client.from('portal_settings').upsert({key:'main', value:SETTINGS, updated_by:adminName(), updated_at:now}, {onConflict:'key'});
+        if(ROSTER.length) await CLOUD.client.from('portal_settings').upsert({key:'roster', value:ROSTER, updated_by:adminName(), updated_at:now}, {onConflict:'key'});
         await fetchCloud(); rebuildFilters(true); renderAll();
         dmSay('Backup restored and pushed to the cloud.', 'var(--green)');
       }
@@ -5580,6 +5623,13 @@ async function toggleAgentStatus(eid){
   toast(a.name + (idx>=0 ? ' reactivated' : ' marked inactive — future slots freed'), idx>=0?'var(--green)':'var(--red)');
 }
 
+async function persistRosterToCloud(){
+  if(!(CLOUD.enabled && CLOUD.user)) return;
+  const { error } = await CLOUD.client.from('portal_settings')
+    .upsert({key:'roster', value:ROSTER, updated_by:adminName(), updated_at:new Date().toISOString()}, {onConflict:'key'});
+  if(error) toast('Roster cloud save failed: ' + error.message, 'var(--red)');
+}
+
 async function persistSettingsToCloud(){
   if(CLOUD.enabled && CLOUD.user){
     const { error } = await CLOUD.client.from('portal_settings')
@@ -5685,6 +5735,9 @@ function handleRosterFile(file){
       const parsed = parseRosterRows(rows);
       if(parsed.error) return showRosterError(parsed.error);
       pendingRoster = computeRosterDiff(parsed.eids, parsed.names);
+      pendingRoster.records = parsed.records;
+      pendingRoster.emailCount = parsed.emailCount || 0;
+      pendingRoster.hasEmailCol = !!parsed.hasEmailCol;
       const el = document.getElementById('rosterResult');
       el.className = 'upload-result show ok';
       const title = document.getElementById('rosterResultTitle');
@@ -5720,30 +5773,45 @@ function parseRosterRows(rows){
   if(!rows || !rows.length) return {error:'The file appears to be empty.'};
   // Find the header row (EID or AGENT NAME may not be on row 1 in raw roster exports)
   let headerIdx = -1, eidCol = -1, nameCol = -1;
+  let emailCol=-1, lobCol=-1, siteCol=-1, tlCol=-1, subLobCol=-1, chCol=-1;
   for(let r=0; r<Math.min(rows.length, 10); r++){
     const hs = (rows[r]||[]).map(h=>h===null?'':String(h).replace(/\u00a0/g,' ').trim().toLowerCase());
     const ei = hs.findIndex(h=>h==='eid' || h==='ied' || h==='employee id');
-    const ni = hs.findIndex(h=>h==='agent name' || h==='name');
-    if(ei>=0 || ni>=0){ headerIdx = r; eidCol = ei; nameCol = ni; break; }
+    const ni = hs.findIndex(h=>h==='agent name' || h==='name' || h==='full name');
+    if(ei>=0 || ni>=0){
+      headerIdx = r; eidCol = ei; nameCol = ni;
+      emailCol  = hs.findIndex(h=>h==='email' || h==='e-mail' || h==='email address' || h==='work email' || h==='agent email');
+      lobCol    = hs.findIndex(h=>h==='lob' || h==='account' || h==='line of business');
+      subLobCol = hs.findIndex(h=>h==='sub lob' || h==='sub-lob' || h==='sublob');
+      siteCol   = hs.findIndex(h=>h==='site' || h==='location');
+      tlCol     = hs.findIndex(h=>h==='team leader' || h==='team lead' || h==='tl' || h==='supervisor');
+      chCol     = hs.findIndex(h=>h==='channel');
+      break;
+    }
   }
   if(headerIdx<0) return {error:'No header row found with an EID (or AGENT NAME) column in the first 10 rows.'};
 
-  const eids = new Set(), names = new Set();
-  let count = 0;
+  const cell = (row,c)=> (c>=0 && row[c]!==null && row[c]!==undefined && String(row[c]).trim()!=='') ? String(row[c]).replace(/\u00a0/g,' ').trim() : '';
+  const eids = new Set(), names = new Set(), records = [];
+  let count = 0, emailCount = 0;
   for(let r=headerIdx+1; r<rows.length; r++){
     const row = rows[r];
     if(!row || row.every(c=>c===null||c==='')) continue;
-    let matched = false;
-    if(eidCol>=0 && row[eidCol]!==null && row[eidCol]!==''){
-      eids.add(String(row[eidCol]).trim()); matched = true;
-    }
-    if(nameCol>=0 && row[nameCol]!==null && String(row[nameCol]).trim()!==''){
-      names.add(String(row[nameCol]).replace(/\u00a0/g,' ').trim().toLowerCase()); matched = true;
-    }
-    if(matched) count++;
+    const eid = cell(row,eidCol), name = cell(row,nameCol);
+    if(!eid && !name) continue;
+    if(eid) eids.add(eid);
+    if(name) names.add(name.toLowerCase());
+    const email = cell(row,emailCol);
+    if(email) emailCount++;
+    records.push({
+      eid, name, email,
+      lob: cell(row,lobCol), subLob: cell(row,subLobCol), site: cell(row,siteCol),
+      teamLeader: cell(row,tlCol), channel: cell(row,chCol)
+    });
+    count++;
   }
   if(!count) return {error:'Header recognized but no agent rows were found under it.'};
-  return {eids, names, count};
+  return {eids, names, count, records, emailCount, hasEmailCol: emailCol>=0};
 }
 
 function computeRosterDiff(activeEids, activeNames){
@@ -5776,6 +5844,15 @@ async function applyRosterSync(){
   if(!confirm('Apply roster sync?\n\nMark inactive: ' + p.toDeactivate.length + ' agent(s)\nReactivate: ' + p.toReactivate.length + ' agent(s)\n\nFuture allocation recalculates immediately. Their already-approved future leaves can then be cancelled via "Future-dated cleanup" below.')) return;
   SETTINGS.inactiveAgents = p.newInactive;
   await persistSettingsToCloud();
+  // The uploaded file also becomes the canonical directory (names, EIDs, emails)
+  if(p.records && p.records.length){
+    ROSTER = p.records.filter(r=>r.name || r.eid);
+    await persistRosterToCloud();
+    refreshAgentList();
+    toast('Roster saved — ' + ROSTER.length + ' agents' +
+      (p.hasEmailCol ? (', ' + p.emailCount + ' with email') : ', no email column found') +
+      ((CLOUD.enabled && CLOUD.user) ? ' · synced' : ' · local only'), 'var(--green)');
+  }
   pendingRoster = null;
   document.getElementById('rosterResult').className = 'upload-result';
   document.getElementById('rosterApply').disabled = true;
