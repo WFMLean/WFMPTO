@@ -1914,13 +1914,13 @@ let LEAVE_DATA = /*__LEAVE_DATA__*/[];
    ================================================================ */
 /* ╔══════════════════════════════════════════════════════════════════╗
    ║                  ★★★  EDIT THIS SECTION ONLY  ★★★                  ║
-   ║        Open this file in Notepad, fill in the 4 values below,      ║
-   ║        save, upload — that is the entire configuration.            ║
+   ║   Fill in the 2 values below + set your team password. Save,       ║
+   ║   upload — that is the entire configuration. No accounts needed.   ║
    ╠══════════════════════════════════════════════════════════════════╣
    ║ STEP 1 — Run supabase_setup.sql once in Supabase → SQL Editor.     ║
    ║ STEP 2 — Supabase → Settings → API: copy the two values below.     ║
-   ║ STEP 3 — Supabase → Authentication → Users → Add user              ║
-   ║          (tick AUTO CONFIRM) and put its login below.              ║
+   ║ STEP 3 — Supabase → Authentication → Sign In / Providers →         ║
+   ║          toggle "Anonymous" ON. (That's it — no users, no email.)  ║
    ╚══════════════════════════════════════════════════════════════════╝ */
 
 const SUPABASE_CONFIG = {
@@ -1937,9 +1937,9 @@ const SUPABASE_CONFIG = {
    work without anyone ever typing an email.
    ================================================================ */
 const ADMIN_ACCESS = {
-  portalPassword: "wfm2026",   // ← the ONE team login password (also changeable later in Settings)
-  cloudEmail: "wfm-portal@leangroup.com",              // ← STEP 3: the shared Supabase user's email
-  cloudPassword: "CaliberWFM2026"            // ← STEP 3: that user's password
+  portalPassword: "wfm2026",   // ← the ONE team login password (changeable later in Settings)
+  cloudEmail: "",              // leave blank — the no-email team login is used (STEP 3 toggle)
+  cloudPassword: ""            // (only fill these if you ever want a dedicated service account instead)
 };
 /* ══════════════════════ END OF EDITABLE SECTION ══════════════════════ */
 /* Password is never stored readable: a deterministic hash is kept instead.
@@ -1954,6 +1954,10 @@ function hashPass(s){
 const ADMIN_PASS_STORE = 'caliber_portal_adminpass_hash';
 /* Precedence: team hash (cloud-shared settings) > this device's saved hash >
    legacy plain setting > the default baked into the file. */
+/* Anonymous cloud sessions have no email — decisions are stamped 'RTA Admin' */
+function adminName(){
+  return (CLOUD.user && CLOUD.user.email) ? CLOUD.user.email : 'RTA Admin';
+}
 function verifyAdminPassword(input){
   if(SETTINGS.adminPassHash) return hashPass(input) === SETTINGS.adminPassHash;
   if(SETTINGS.adminPassword) return input === String(SETTINGS.adminPassword);
@@ -1971,8 +1975,7 @@ function safeStoreGet(k){ try{ return localStorage.getItem(k); }catch(e){ return
 function safeStoreSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
 function safeStoreDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
 (function applyDeviceSupabaseOverride(){
-  /* File-config edition: the values typed above are the single source of
-     truth — no per-device override, no in-app connection screen. */
+  /* File-config edition: the values typed above are the single source of truth. */
 })();
 (function applyDevicePasswordHash(){
   try{
@@ -3992,11 +3995,8 @@ function openLoginModal(){
   document.getElementById('loginPassword').value = '';
   const note = document.getElementById('loginNote');
   note.innerHTML = CLOUD.enabled
-    ? 'One shared team password — no accounts to create. ' +
-      (ADMIN_ACCESS.cloudEmail
-        ? 'Cloud sync is active: your decisions save for everyone.'
-        : 'Heads up: no shared cloud login is baked in, so decisions stay on this device until one is configured.')
-    : 'One shared team password — no accounts to create. Running in local mode: decisions stay in this session (export via CSV), or connect the cloud in Settings.';
+    ? 'One shared team password — no accounts, no emails. Your decisions sync to the cloud for the whole team.'
+    : 'One shared team password — no accounts to create. Running in local mode: decisions stay in this session (export via CSV).';
   document.getElementById('loginModal').classList.add('open');
   setTimeout(()=>{ try{ document.getElementById('loginPassword').focus(); }catch(e){} }, 50);
 }
@@ -4035,14 +4035,39 @@ async function doLogin(){
       toast('Admin unlocked — cloud sync active','var(--green)');
       return;
     }
-    // No cloud (or no shared cloud login configured): local admin session
+    // No email account configured: use Supabase ANONYMOUS sign-in —
+    // an authenticated session with no email/user to manage.
+    // (One-time toggle: Supabase -> Authentication -> Sign In / Providers -> Anonymous)
+    if(CLOUD.enabled){
+      try{
+        const { data, error } = await CLOUD.client.auth.signInAnonymously();
+        if(!error && data && data.user){
+          setAuthUser(data.user);
+          closeLoginModal();
+          switchToApprovals();
+          toast('Admin unlocked — cloud sync active (shared team session)','var(--green)');
+          return;
+        }
+        CLOUD.demoAdmin = true;
+        setAuthUser({email:'local-demo-admin'});
+        closeLoginModal();
+        switchToApprovals();
+        toast('Admin unlocked — cloud writes OFF: enable "Anonymous" in Supabase -> Authentication -> Sign In / Providers, then log in again','var(--amber)');
+        return;
+      }catch(e){
+        CLOUD.demoAdmin = true;
+        setAuthUser({email:'local-demo-admin'});
+        closeLoginModal(); switchToApprovals();
+        toast('Admin unlocked — cloud sign-in unavailable ('+ (e.message||'error') +'), decisions are local-only','var(--amber)');
+        return;
+      }
+    }
+    // No cloud at all: local session
     CLOUD.demoAdmin = true;
     setAuthUser({email:'local-demo-admin'});
     closeLoginModal();
     switchToApprovals();
-    toast(CLOUD.enabled
-      ? 'Admin unlocked — configure the shared cloud login to save decisions for everyone'
-      : 'Admin unlocked — local session (export decisions via CSV)', 'var(--green)');
+    toast('Admin unlocked — local session (export decisions via CSV)', 'var(--green)');
   }finally{
     btn.disabled = false; btn.textContent = 'Unlock admin';
   }
@@ -4308,7 +4333,7 @@ async function autoDeny(ids){
   if(!confirm('Auto-deny ' + ids.length + ' request(s)?\n\nCriteria: filed with less than ' + SETTINGS.autoDenyDays + ' days\' notice (or a past date).' +
     (SETTINGS.autoDenyExemptReasons.length ? '\nExempt reasons (left in queue): ' + SETTINGS.autoDenyExemptReasons.join(', ') : '') +
     '\nEach will be stamped "(auto)" in the audit trail.')) return;
-  const decidedBy = (CLOUD.user ? CLOUD.user.email : 'local-demo-admin');
+  const decidedBy = adminName();
   const decidedAt = new Date().toISOString();
   const comment = 'Denied: filed under the ' + SETTINGS.autoDenyDays + '-day policy window (auto)';
 
@@ -4337,7 +4362,7 @@ async function autoApprove(ids){
   if(!isAdmin()){ openLoginModal(); return; }
   if(!ids.length) return;
   if(!confirm('Auto-approve ' + ids.length + ' request(s)?\n\nCriteria: filed on time (' + SETTINGS.noticeDays + 'd+) and within the day\'s allocation cap, first-filed first-served.\nEach will be stamped "(auto)" in the audit trail.')) return;
-  const decidedBy = (CLOUD.user ? CLOUD.user.email : 'local-demo-admin');
+  const decidedBy = adminName();
   const decidedAt = new Date().toISOString();
   const comment = 'Approved: within allocation (auto)';
 
@@ -4385,7 +4410,7 @@ async function decide(id, verdict, opts){
   } else {
     comment = 'Denied: ' + (note || 'no allocation available');
   }
-  const decidedBy = CLOUD.user ? CLOUD.user.email : 'local-demo-admin';
+  const decidedBy = adminName();
   const decidedAt = new Date().toISOString();
 
   // Optimistic local update
@@ -4528,7 +4553,7 @@ async function editCap(date, lob){
     ALLOC_CAPS[key] = cap;
     if(CLOUD.enabled && CLOUD.user){
       const { error } = await CLOUD.client.from('allocation_caps')
-        .upsert({date, lob, cap, updated_by:CLOUD.user.email, updated_at:new Date().toISOString()}, {onConflict:'date,lob'});
+        .upsert({date, lob, cap, updated_by:adminName(), updated_at:new Date().toISOString()}, {onConflict:'date,lob'});
       if(error){ toast('Cloud cap save failed: '+error.message,'var(--red)'); }
     }
     toast(lob + ' cap on ' + date + ' set to ' + cap, 'var(--teal)');
@@ -4715,7 +4740,7 @@ async function saveSettings(){
 
   if(CLOUD.enabled && CLOUD.user){
     const { error } = await CLOUD.client.from('portal_settings')
-      .upsert({key:'main', value:SETTINGS, updated_by:CLOUD.user.email, updated_at:new Date().toISOString()}, {onConflict:'key'});
+      .upsert({key:'main', value:SETTINGS, updated_by:adminName(), updated_at:new Date().toISOString()}, {onConflict:'key'});
     if(error){ toast('Cloud settings save failed: '+error.message,'var(--red)'); }
   }
   document.getElementById('settingsModal').classList.remove('open');
@@ -4779,7 +4804,20 @@ async function runCloudDiagnostics(){
   if(!verdict){
     let user = null;
     try{ const g = await CLOUD.client.auth.getUser(); user = g && g.data ? g.data.user : null; }catch(e){}
-    if(!user && ADMIN_ACCESS.cloudEmail && ADMIN_ACCESS.cloudPassword){
+    if(!user && !ADMIN_ACCESS.cloudEmail){
+      P('   4. No session — trying the shared ANONYMOUS team sign-in now…');
+      try{
+        const s = await CLOUD.client.auth.signInAnonymously();
+        if(s.error){
+          P(NO+'4. Anonymous sign-in FAILED: ' + s.error.message);
+          verdict = 'FIX: enable it once in Supabase -> Authentication -> Sign In / Providers -> toggle "Anonymous" ON. No email or user needed. Then log in again.';
+        } else { user = s.data.user; setAuthUser(user); P(OK+'4. Shared team session active (anonymous — no email needed)'); }
+      }catch(e){
+        P(NO+'4. Anonymous sign-in error: ' + (e.message||e));
+        verdict = 'FIX: enable "Anonymous" in Supabase -> Authentication -> Sign In / Providers, then re-run.';
+      }
+    }
+    if(!verdict && !user && ADMIN_ACCESS.cloudEmail && ADMIN_ACCESS.cloudPassword){
       P('   4. No session — trying the ADMIN_ACCESS shared login now…');
       const s = await CLOUD.client.auth.signInWithPassword({email:ADMIN_ACCESS.cloudEmail, password:ADMIN_ACCESS.cloudPassword});
       if(s.error){
@@ -4790,10 +4828,7 @@ async function runCloudDiagnostics(){
       } else { user = s.data.user; setAuthUser(user); }
     }
     if(!verdict){
-      if(!user && !ADMIN_ACCESS.cloudEmail){
-        P(NO+'4. No session and ADMIN_ACCESS.cloudEmail is EMPTY in this file');
-        verdict = 'FIX: this is why nothing saves. Create ONE user in Supabase -> Authentication -> Users (tick Auto Confirm), put its email+password into ADMIN_ACCESS in this file, re-upload.';
-      } else if(user){
+      if(user){
         P(OK+'4. Authenticated session active (' + user.email + ')');
       }
     }
@@ -4858,7 +4893,7 @@ function updatePassStateLabel(){
 
 /* ============================= CLOUD CONNECTION (Settings) ============================= */
 function sbPopulateSettings(){
-  if(!document.getElementById('sbUrl')) return;  // file-config edition: section not present
+  if(!document.getElementById('sbUrl')) return;
   const saved = safeStoreGet(SB_STORE_KEY);
   const src = document.getElementById('sbSourceLabel');
   if(saved) src.textContent = '· SAVED ON THIS DEVICE';
@@ -4870,7 +4905,7 @@ function sbPopulateSettings(){
   keyEl.value = '';
   keyEl.placeholder = SUPABASE_CONFIG.anonKey ? '••••••••  (saved — leave blank to keep)' : 'eyJhbGciOi...';
   document.getElementById('sbStatus').textContent = CLOUD.enabled
-    ? 'Currently connected' + (CLOUD.user ? ' · signed in as ' + CLOUD.user.email : ' · not signed in yet')
+    ? 'Currently connected' + (CLOUD.user ? ' · signed in as ' + adminName() : ' · not signed in yet')
     : 'Not connected — running on the embedded local data.';
   document.getElementById('sbStatus').style.color = CLOUD.enabled ? 'var(--green)' : 'var(--muted)';
 }
@@ -5250,7 +5285,7 @@ async function applyCaps(){
     // Cloud batch upsert
     if(CLOUD.enabled && CLOUD.user){
       const now = new Date().toISOString();
-      const rows = pendingCaps.map(c=>({date:c.date, lob:c.lob, cap:c.cap, updated_by:CLOUD.user.email, updated_at:now}));
+      const rows = pendingCaps.map(c=>({date:c.date, lob:c.lob, cap:c.cap, updated_by:adminName(), updated_at:now}));
       for(let i=0; i<rows.length; i+=500){
         const { error } = await CLOUD.client.from('allocation_caps').upsert(rows.slice(i,i+500), {onConflict:'date,lob'});
         if(error) throw new Error(error.message);
@@ -5280,7 +5315,7 @@ function buildBackupObject(){
     format: 'caliber-leave-portal-backup',
     version: 2,
     exportedAt: new Date().toISOString(),
-    exportedBy: CLOUD.user ? CLOUD.user.email : 'local-admin',
+    exportedBy: adminName(),
     settings: SETTINGS,
     allocCaps: ALLOC_CAPS,
     requests: LEAVE_DATA,
@@ -5354,12 +5389,12 @@ async function dmRestore(file){
         const now = new Date().toISOString();
         const capRows = Object.entries(ALLOC_CAPS).map(([k,cap])=>{
           const [date,lob] = k.split('|');
-          return {date, lob, cap, updated_by:CLOUD.user.email, updated_at:now};
+          return {date, lob, cap, updated_by:adminName(), updated_at:now};
         });
         for(let i=0;i<capRows.length;i+=500){
           await CLOUD.client.from('allocation_caps').upsert(capRows.slice(i,i+500), {onConflict:'date,lob'});
         }
-        await CLOUD.client.from('portal_settings').upsert({key:'main', value:SETTINGS, updated_by:CLOUD.user.email, updated_at:now}, {onConflict:'key'});
+        await CLOUD.client.from('portal_settings').upsert({key:'main', value:SETTINGS, updated_by:adminName(), updated_at:now}, {onConflict:'key'});
         await fetchCloud(); rebuildFilters(true); renderAll();
         dmSay('Backup restored and pushed to the cloud.', 'var(--green)');
       }
@@ -5412,7 +5447,7 @@ async function overrideDecision(id, newStatus, note){
       (note ? '\nNote: ' + note : '') +
       '\n\nThe change is stamped in the audit trail.')) return;
 
-  const decidedBy = CLOUD.user ? CLOUD.user.email : 'local-demo-admin';
+  const decidedBy = adminName();
   const decidedAt = new Date().toISOString();
   const suffix = note ? ' \u2014 ' + note : '';
   let comment, approved;
@@ -5548,7 +5583,7 @@ async function toggleAgentStatus(eid){
 async function persistSettingsToCloud(){
   if(CLOUD.enabled && CLOUD.user){
     const { error } = await CLOUD.client.from('portal_settings')
-      .upsert({key:'main', value:SETTINGS, updated_by:CLOUD.user.email, updated_at:new Date().toISOString()}, {onConflict:'key'});
+      .upsert({key:'main', value:SETTINGS, updated_by:adminName(), updated_at:new Date().toISOString()}, {onConflict:'key'});
     if(error) toast('Cloud settings sync failed: '+error.message,'var(--red)');
   }
 }
@@ -5563,7 +5598,7 @@ async function runAgentsCleanup(){
   const ids = cleanupTargetIds();
   if(!ids.length) return;
   if(!confirm('Cancel ' + ids.length + ' future-dated approved leave(s) belonging to inactive agents?\n\nEach is stamped "Cancelled: agent inactive" in the audit trail. Historical (past) leaves are never touched.')) return;
-  const decidedBy = CLOUD.user ? CLOUD.user.email : 'local-demo-admin';
+  const decidedBy = adminName();
   const decidedAt = new Date().toISOString();
   const comment = 'Cancelled: agent inactive (admin cleanup)';
   const statusEl = document.getElementById('agentsCleanupStatus');
@@ -5773,7 +5808,7 @@ async function sendTestEmail(){
     'This is a test notification from the Caliber Leave & PTO Portal.',
     '',
     'Mode:       ' + mode,
-    'Sent by:    ' + (CLOUD.user ? CLOUD.user.email : 'local-demo-admin'),
+    'Sent by:    ' + adminName(),
     'Sent at:    ' + new Date().toLocaleString(),
     'Cloud:      ' + (CLOUD.enabled ? 'connected (' + SUPABASE_CONFIG.url + ')' : 'local mode'),
     '',
