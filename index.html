@@ -1574,6 +1574,10 @@
 
       <div class="setup-step">
         <div class="ss-title">Data management</div>
+        <div class="tpl-btns" style="margin-bottom:8px;">
+          <button class="tpl-btn" id="diagBtn" style="border-color:rgba(65,195,214,0.45);color:var(--teal);">&#129658; Run cloud diagnostics</button>
+        </div>
+        <div id="diagOut" style="display:none;font-family:var(--font-mono);font-size:10.5px;line-height:1.75;background:var(--navy-950);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:12px;white-space:pre-wrap;"></div>
         <div class="dm-grid">
           <button class="dm-btn" id="dmBackup">&#128190; Download backup (.json)<span class="dm-sub">Requests, caps, and settings in one restorable file</span></button>
           <button class="dm-btn" id="dmRestore">&#8634; Restore from backup<span class="dm-sub">Load a .json backup — replaces current data</span></button>
@@ -1920,7 +1924,7 @@ let LEAVE_DATA = /*__LEAVE_DATA__*/[];
    ╚══════════════════════════════════════════════════════════════════╝ */
 
 const SUPABASE_CONFIG = {
-  url:     "https://rwlvfybgxdtifzcasbpz.supabase.co",   // ← STEP 2: Project URL, e.g. "https://rwlvfybgxdtifzcasbpz.supabase.co"
+  url:     "https://rwlvfybgxdtifzcasbpz.supabase.co",   // ← STEP 2: Project URL, e.g. "https://abcdefgh.supabase.co"
   anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ3bHZmeWJneGR0aWZ6Y2FzYnB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzODI2MzQsImV4cCI6MjA5OTk1ODYzNH0.8nAwFalcKpbHkAhkVJIGSo-e7M10CgsQZuKsJ2pLEjE",   // ← STEP 2: anon public key (the long eyJ... string)
   table: "leave_requests"        // (leave as-is)
 };
@@ -2312,6 +2316,7 @@ function init(){
   document.getElementById('addLobBtn').addEventListener('click',addLob);
   if(document.getElementById('sbConnect')) document.getElementById('sbConnect').addEventListener('click',sbConnect);
   document.getElementById('cpChangeBtn').addEventListener('click',changeAdminPassword);
+  document.getElementById('diagBtn').addEventListener('click',runCloudDiagnostics);
   document.getElementById('cpConfirm').addEventListener('keydown',e=>{ if(e.key==='Enter') changeAdminPassword(); });
   if(document.getElementById('sbForget')) document.getElementById('sbForget').addEventListener('click',sbForget);
   if(document.getElementById('sbKeyEye')) document.getElementById('sbKeyEye').addEventListener('click',()=>{
@@ -4720,6 +4725,97 @@ async function saveSettings(){
   toast('Settings saved' + ((CLOUD.enabled&&CLOUD.user)?' · synced to cloud':''), 'var(--green)');
 }
 
+/* ============================= CLOUD DIAGNOSTICS ============================= */
+/* One click, five layers, exact verdict. Writes only a single 'diag' key
+   into portal_settings (harmless, overwritten each run). */
+async function runCloudDiagnostics(){
+  const out = document.getElementById('diagOut');
+  out.style.display = 'block';
+  const lines = [];
+  const P = (s)=>{ lines.push(s); out.textContent = lines.join('\n'); };
+  const OK='\u2713 ', NO='\u2715 ';
+  let verdict = null;
+
+  P('CLOUD DIAGNOSTICS — ' + new Date().toLocaleString());
+  P('');
+
+  // 1. Config present
+  if(!SUPABASE_CONFIG.url || !SUPABASE_CONFIG.anonKey){
+    P(NO+'1. Config: url/anonKey empty in this file');
+    verdict = 'FIX: open this HTML in Notepad, fill the EDIT-ME block (Project URL + anon key from Supabase -> Settings -> API), re-upload.';
+  } else {
+    P(OK+'1. Config: url + anon key present (' + SUPABASE_CONFIG.url + ')');
+  }
+
+  // 2. Client up
+  if(!verdict){
+    if(!CLOUD.enabled || !CLOUD.client){
+      P('   2. Client not running — attempting to start…');
+      try{ await bootCloud(); }catch(e){}
+      if(!CLOUD.enabled){
+        P(NO+'2. Client failed to start');
+        verdict = 'FIX: the URL or anon key is wrong (typo / stray space). Re-copy both from Supabase -> Settings -> API.';
+      } else P(OK+'2. Client running');
+    } else P(OK+'2. Client running');
+  }
+
+  // 3. Read (schema exists?)
+  if(!verdict){
+    const r = await CLOUD.client.from(SUPABASE_CONFIG.table).select('id',{count:'exact',head:true});
+    if(r.error){
+      P(NO+'3. Read failed: ' + r.error.message);
+      verdict = /does not exist|relation|schema/i.test(r.error.message)
+        ? 'FIX: the tables are missing — run supabase_setup.sql in Supabase -> SQL Editor (safe to re-run).'
+        : /api key|jwt|401|invalid/i.test(r.error.message)
+          ? 'FIX: anon key is wrong — re-copy the anon public key.'
+          : 'FIX: read blocked — re-run supabase_setup.sql to restore the policies.';
+    } else {
+      P(OK+'3. Read OK — cloud table currently holds ' + (r.count===null?'?':r.count) + ' request rows');
+      if(r.count===0) P('   (0 rows = nothing has ever been pushed — seed via Restore from backup after the session check passes)');
+    }
+  }
+
+  // 4. Authenticated session (required for ALL admin writes)
+  if(!verdict){
+    let user = null;
+    try{ const g = await CLOUD.client.auth.getUser(); user = g && g.data ? g.data.user : null; }catch(e){}
+    if(!user && ADMIN_ACCESS.cloudEmail && ADMIN_ACCESS.cloudPassword){
+      P('   4. No session — trying the ADMIN_ACCESS shared login now…');
+      const s = await CLOUD.client.auth.signInWithPassword({email:ADMIN_ACCESS.cloudEmail, password:ADMIN_ACCESS.cloudPassword});
+      if(s.error){
+        P(NO+'4. Shared login FAILED: ' + s.error.message);
+        verdict = /confirm/i.test(s.error.message)
+          ? 'FIX: the shared user was created WITHOUT Auto Confirm. In Supabase -> Authentication -> Users: delete it, Add user again, TICK "Auto Confirm User".'
+          : 'FIX: email or password in ADMIN_ACCESS does not match the Supabase user. Re-check both (watch for trailing spaces).';
+      } else { user = s.data.user; setAuthUser(user); }
+    }
+    if(!verdict){
+      if(!user && !ADMIN_ACCESS.cloudEmail){
+        P(NO+'4. No session and ADMIN_ACCESS.cloudEmail is EMPTY in this file');
+        verdict = 'FIX: this is why nothing saves. Create ONE user in Supabase -> Authentication -> Users (tick Auto Confirm), put its email+password into ADMIN_ACCESS in this file, re-upload.';
+      } else if(user){
+        P(OK+'4. Authenticated session active (' + user.email + ')');
+      }
+    }
+  }
+
+  // 5. Write test
+  if(!verdict){
+    const w = await CLOUD.client.from('portal_settings').upsert(
+      {key:'diag', value:{at:new Date().toISOString()}, updated_by:'diagnostics'}, {onConflict:'key'});
+    if(w.error){
+      P(NO+'5. Write failed: ' + w.error.message);
+      verdict = 'FIX: policies incomplete — re-run supabase_setup.sql (v2), which rebuilds all 11 policies.';
+    } else {
+      P(OK+'5. Write OK — settings/decisions WILL persist');
+    }
+  }
+
+  P('');
+  P(verdict ? ('VERDICT: ' + verdict) : 'VERDICT: ALL CLEAR \u2014 every layer works. If the portal looked empty, seed it: Settings -> Restore from backup -> confirm the cloud replace.');
+  out.style.borderColor = verdict ? 'var(--amber)' : 'var(--green)';
+}
+
 /* ============================= CHANGE ADMIN PASSWORD ============================= */
 async function changeAdminPassword(){
   const statusEl = document.getElementById('cpStatus');
@@ -5245,6 +5341,12 @@ async function dmRestore(file){
     SESSION_FILINGS = [];
     refreshMeta(); rebuildFilters(); refreshAgentList(); renderAll();
     dmSay('Backup restored locally — ' + LEAVE_DATA.length + ' requests loaded.', 'var(--green)');
+    if(CLOUD.enabled && !CLOUD.user){
+      dmSay('Restored on this device ONLY — the cloud was NOT touched because there is no signed-in cloud session. ' +
+            'Fix the shared login in ADMIN_ACCESS (or run Cloud diagnostics below), sign in again, then restore once more.', 'var(--amber)');
+    } else if(!CLOUD.enabled){
+      dmSay('Restored locally (' + LEAVE_DATA.length + ' requests). No cloud is configured, so nothing was pushed.', 'var(--amber)');
+    }
     if(CLOUD.enabled && CLOUD.user){
       if(confirm('Also replace the CLOUD data with this backup so everyone sees it?')){
         dmSay('Replacing cloud data…');
