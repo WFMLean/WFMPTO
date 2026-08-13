@@ -1255,7 +1255,7 @@
       <div class="view-bar">
         <div class="tabs" id="viewTabs">
           <div class="tab active" data-view="calendar"><span class="t-ico">&#9638;</span><span class="t-label">Calendar</span></div>
-          <div class="tab admin-only" data-view="planning"><span class="t-ico">&#8862;</span><span class="t-label">Planning</span></div>
+          <div class="tab" data-view="planning"><span class="t-ico">&#8862;</span><span class="t-label">Planning</span></div>
           <div class="tab" data-view="table"><span class="t-ico">&#9776;</span><span class="t-label">Table</span></div>
           <div class="tab" data-view="insights"><span class="t-ico">&#9685;</span><span class="t-label">Insights</span></div>
           <div class="tab admin-only" data-view="approvals" id="approvalsTab"><span class="t-ico">&#10003;</span><span class="t-label">Approvals</span><span class="lock" id="approvalsLock" style="display:none;"></span></div>
@@ -2197,7 +2197,7 @@ function init(){
   document.querySelectorAll('.tab').forEach(tab=>{
     tab.addEventListener('click',()=>{
       const view = tab.dataset.view;
-      if((view==='approvals' || view==='planning' || view==='denied') && !isAdmin()){
+      if((view==='approvals' || view==='denied') && !isAdmin()){
         // Not signed in: route to the right unlock path
         if(CLOUD.enabled){ openLoginModal(); }
         else { openLoginModal(true); }
@@ -4138,7 +4138,7 @@ function setAuthUser(user){
     gear.classList.remove('show');
   }
   // If an admin-only view was open, fall back gracefully
-  if(!admin && (state.view==='approvals' || state.view==='planning' || state.view==='denied')){
+  if(!admin && (state.view==='approvals' || state.view==='denied')){
     const cal = document.querySelector('.tab[data-view="calendar"]');
     if(cal && cal.click) cal.click();
   }
