@@ -817,6 +817,51 @@
   .plan-cell .pend{font-size:9px;color:var(--amber);}
   .plan-totals td{border-top:2px solid var(--navy-600);font-weight:600;color:var(--ink);font-family:var(--font-mono);font-size:11px;}
 
+  /* ---------- Planning: heatmap + tap-to-inspect (v3) ---------- */
+  .plan-cell.inspectable{cursor:pointer;transition:transform .1s ease, box-shadow .12s ease, filter .12s ease;}
+  .plan-cell.inspectable:hover{transform:translateY(-1px);box-shadow:0 5px 16px -8px rgba(0,0,0,0.6);filter:brightness(1.14) saturate(1.08);}
+  .plan-cell.sel{outline:2px solid var(--teal);outline-offset:1px;box-shadow:0 0 14px -3px rgba(65,195,214,0.6);}
+  .plan-legend .heat-strip{display:inline-block;width:84px;height:9px;border-radius:5px;vertical-align:middle;
+    background:linear-gradient(90deg,hsla(152,70%,52%,.45),hsla(90,70%,50%,.55),hsla(45,72%,50%,.7),hsla(4,78%,52%,.9));}
+  .plan-legend .heat-lab{margin-left:7px;}
+
+  .plan-pop{
+    position:fixed;z-index:72;width:300px;max-width:92vw;
+    background:linear-gradient(180deg,var(--navy-800),var(--navy-850));
+    border:1px solid var(--navy-600);border-radius:14px;
+    box-shadow:0 22px 52px -18px rgba(0,0,0,0.75), 0 0 0 1px rgba(65,195,214,0.06);
+    opacity:0;pointer-events:none;transform:translateY(-6px) scale(.985);
+    transition:opacity .15s ease, transform .15s ease;overflow:hidden;
+  }
+  .plan-pop.open{opacity:1;pointer-events:auto;transform:translateY(0) scale(1);}
+  .plan-pop .pp-head{padding:12px 14px 11px;border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+    background:radial-gradient(120% 140% at 0% 0%, rgba(46,95,163,0.18), transparent 60%);}
+  .plan-pop .pp-title{font-family:var(--font-display);font-weight:600;font-size:14px;color:var(--ink);letter-spacing:.2px;}
+  .plan-pop .pp-date{font-family:var(--font-mono);font-size:9.5px;color:var(--muted);margin-top:3px;letter-spacing:.03em;}
+  .plan-pop .pp-x{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;padding:3px 5px;border-radius:6px;}
+  .plan-pop .pp-x:hover{color:var(--ink);background:rgba(255,255,255,0.07);}
+  .plan-pop .pp-body{padding:13px 14px 14px;}
+  .plan-pop .pp-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;}
+  .plan-pop .pp-metric{background:var(--navy-900);border:1px solid var(--line);border-radius:10px;padding:9px 6px;text-align:center;}
+  .plan-pop .pp-metric .n{font-family:var(--font-mono);font-size:17px;font-weight:700;color:var(--ink);line-height:1;}
+  .plan-pop .pp-metric .k{font-size:8.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:5px;}
+  .plan-pop .pp-bar{height:8px;border-radius:6px;background:var(--navy-700);overflow:hidden;margin-bottom:5px;}
+  .plan-pop .pp-bar > span{display:block;height:100%;border-radius:6px;transition:width .35s ease;}
+  .plan-pop .pp-bar-lbl{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9.5px;color:var(--muted);margin-bottom:13px;letter-spacing:.03em;}
+  .plan-pop .pp-sect{font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 6px;}
+  .plan-pop .pp-agents{max-height:148px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
+  .plan-pop .pp-agent{display:flex;align-items:center;gap:8px;padding:5px 9px;border-radius:7px;background:var(--navy-900);font-size:11px;}
+  .plan-pop .pp-agent .dotp{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+  .plan-pop .pp-agent .nm{color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+  .plan-pop .pp-agent .eidp{font-family:var(--font-mono);font-size:9px;color:var(--muted);flex-shrink:0;}
+  .plan-pop .pp-empty{font-size:11px;color:var(--muted);text-align:center;padding:16px 6px;line-height:1.6;}
+  .plan-pop .pp-foot{margin-top:13px;display:flex;gap:8px;}
+  .plan-pop .pp-foot button{flex:1;border:1px solid var(--line);background:var(--navy-850);color:var(--ink-dim);
+    border-radius:8px;padding:9px;font-size:11px;cursor:pointer;font-family:var(--font-body);
+    transition:border-color .12s, color .12s, background .12s;}
+  .plan-pop .pp-foot button:hover{border-color:var(--teal);color:var(--teal);background:var(--navy-800);}
+
   /* ---------- Settings ---------- */
   .gear-btn{
     display:none;width:26px;height:26px;border-radius:50%;border:1px solid var(--line);
@@ -1308,6 +1353,7 @@
           <span class="pl"><span class="sw" style="background:rgba(61,220,151,0.5)"></span>Slots open</span>
           <span class="pl"><span class="sw" style="background:rgba(245,176,74,0.5)"></span>&ge;80% used</span>
           <span class="pl"><span class="sw" style="background:rgba(255,77,94,0.5)"></span>Full / over</span>
+          <span class="pl"><span class="heat-strip"></span><span class="heat-lab">utilization heatmap</span></span>
           <span class="pl" style="color:var(--amber)">+n = pending against that day</span>
           <span class="pl" id="planEditHint"></span>
         </div>
@@ -2213,6 +2259,7 @@ function init(){
       document.getElementById('viewApprovals').style.display = state.view==='approvals' ? '' : 'none';
       document.getElementById('viewDenied').style.display = state.view==='denied' ? '' : 'none';
       document.getElementById('calendarControls').style.display = (state.view==='calendar'||state.view==='planning') ? '' : 'none';
+      if(state.view!=='planning') closePlanInspect();
       renderAll();
     });
   });
@@ -2250,7 +2297,7 @@ function init(){
   document.getElementById('uploadModal').addEventListener('click',e=>{
     if(e.target===document.getElementById('uploadModal')) closeUploadModal();
   });
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeUploadModal(); closePtoModal(); closeLoginModal(); closeCapsModal(); closeAgentsModal(); closeNotifPanel(); document.getElementById('setupModal').classList.remove('open'); document.getElementById('settingsModal').classList.remove('open'); closeDrawer(); } });
+  document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeUploadModal(); closePtoModal(); closeLoginModal(); closeCapsModal(); closeAgentsModal(); closeNotifPanel(); closePlanInspect(); document.getElementById('setupModal').classList.remove('open'); document.getElementById('settingsModal').classList.remove('open'); closeDrawer(); } });
 
   document.getElementById('dictToggle').addEventListener('click',()=>{
     const w = document.getElementById('dictWrap');
@@ -4493,14 +4540,15 @@ function toast(msg, color){
 
 /* ============================= PLANNING MATRIX ============================= */
 function renderPlanningView(){
+  closePlanInspect();
   const y = state.calYear, m = state.calMonth;
   const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
   document.getElementById('monthLabel').textContent = `${months[m]} ${y}`;
   const lobs = Object.keys(SETTINGS.defaultCaps);
   const admin = isAdmin();
   document.getElementById('planEditHint').innerHTML = admin
-    ? '<span style="color:var(--teal)">Click any cell to set that day\'s cap (blank = back to default)</span>'
-    : 'Sign in as RTA to edit daily caps';
+    ? '<span style="color:var(--teal)">Click any day to inspect \u00b7 use Edit cap in the panel (blank = default)</span>'
+    : '<span style="color:var(--teal)">Click any day to inspect its allocation</span> \u00b7 sign in as RTA to edit';
   document.getElementById('planSub').textContent =
     'Daily leave slots per LOB — defaults: ' + lobs.map(l=>l+' '+SETTINGS.defaultCaps[l]).join(' · ');
 
@@ -4538,8 +4586,8 @@ function renderPlanningView(){
       const ratio = cap>0 ? used/cap : (used>0?2:0);
       const cls = used>=cap ? 'full' : (ratio>=0.8 ? 'near' : 'free');
       const hasOverride = (dateStr+'|'+l) in ALLOC_CAPS;
-      rows += `<td><span class="plan-cell ${cls} ${admin?'editable':''}" data-date="${dateStr}" data-lob="${escapeHtml(l)}"
-        title="${escapeHtml(l)} · ${dateStr} — ${used} approved of ${cap} cap${hasOverride?' (day override)':' (default)'}${p?' · '+p+' pending':''}${admin?' · click to edit cap':''}">
+      rows += `<td><span class="plan-cell ${cls} inspectable${admin?' editable':''}" data-date="${dateStr}" data-lob="${escapeHtml(l)}" style="${heatStyle(ratio)}"
+        title="${escapeHtml(l)} · ${dateStr} — ${used} approved of ${cap} cap${hasOverride?' (day override)':' (default)'}${p?' · '+p+' pending':''} · click to inspect">
         ${used}/${cap}${hasOverride?'*':''}${p?`<span class="pend">+${p}</span>`:''}
       </span></td>`;
     });
@@ -4554,11 +4602,104 @@ function renderPlanningView(){
 
   document.getElementById('planBody').innerHTML = rows;
 
-  if(admin){
-    document.querySelectorAll('.plan-cell.editable').forEach(cell=>{
-      cell.addEventListener('click',()=>editCap(cell.dataset.date, cell.dataset.lob));
-    });
-  }
+  document.querySelectorAll('.plan-cell.inspectable').forEach(cell=>{
+    cell.addEventListener('click',(e)=>{ e.stopPropagation(); openPlanInspect(cell); });
+  });
+}
+
+/* ===================== PLANNING HEATMAP + TAP-TO-INSPECT (v3) ===================== */
+/* Read-only interactivity for everyone; admins also get "Edit cap" inside the panel. */
+function planHeat(ratio){
+  if(ratio > 1.001) return {bg:'rgba(255,77,94,0.90)', fg:'#fff', border:'var(--red)', over:true};
+  const t = Math.max(0, Math.min(1, ratio));
+  const hue = 152 - t*148;                 // green -> amber -> red
+  const light = 54 - t*7;
+  const alpha = 0.12 + t*0.55;             // empty days stay dark
+  return {bg:`hsla(${hue.toFixed(0)},70%,${light.toFixed(0)}%,${alpha.toFixed(2)})`,
+          fg: t>0.62 ? '#fff' : 'var(--ink-dim)', over:false};
+}
+function heatStyle(ratio){
+  const h = planHeat(ratio);
+  let s = `background:${h.bg};color:${h.fg};`;
+  if(h.over) s += `border-color:${h.border};box-shadow:0 0 10px -2px rgba(255,77,94,0.55);`;
+  return s;
+}
+
+let planInspectOutside = null;
+function getPlanPop(){
+  let p = document.getElementById('planPop');
+  if(!p){ p = document.createElement('div'); p.className='plan-pop'; p.id='planPop'; document.body.appendChild(p); }
+  return p;
+}
+function positionFloat(el, anchor, w, h){
+  const r = anchor.getBoundingClientRect();
+  let left = r.left + r.width/2 - w/2;
+  left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+  let top = r.bottom + 8;
+  if(top + h > window.innerHeight) top = Math.max(8, r.top - 8 - h);
+  el.style.left = left + 'px'; el.style.top = top + 'px'; el.style.width = w + 'px';
+}
+function closePlanInspect(){
+  const p = document.getElementById('planPop');
+  if(p) p.classList.remove('open');
+  document.querySelectorAll('.plan-cell.sel').forEach(c=>c.classList.remove('sel'));
+  if(planInspectOutside){ document.removeEventListener('click', planInspectOutside, true); planInspectOutside=null; }
+}
+function openPlanInspect(cell){
+  closePlanInspect();
+  const date = cell.dataset.date, lob = cell.dataset.lob;
+  const cap = capFor(date, lob), used = usedFor(date, lob), pend = pendingFor(date, lob);
+  const open = Math.max(0, cap - used);
+  const ratio = cap>0 ? used/cap : (used>0?2:0);
+  const pct = cap>0 ? Math.round(used/cap*100) : (used>0?999:0);
+  const over = used > cap;
+  const isOverride = (date+'|'+lob) in ALLOC_CAPS;
+  const future = date >= TODAY_STR;
+  const appr = LEAVE_DATA.filter(d=>d.date===date && d.lob===lob && d.status==='Approved' && !(future && isInactive(d.eid)));
+  const pendList = LEAVE_DATA.filter(d=>d.date===date && d.lob===lob && d.status==='Pending');
+  const h = planHeat(ratio);
+  const barPct = Math.min(100, cap>0 ? Math.round(used/cap*100) : (used>0?100:0));
+
+  const agentRow = (d,kind)=>'<div class="pp-agent"><span class="dotp" style="background:'+(kind==='pend'?'var(--amber)':'var(--green)')+'"></span><span class="nm" title="'+escapeHtml(d.name||'')+'">'+escapeHtml(d.name||'\u2014')+'</span><span class="eidp">'+escapeHtml(String(d.eid||''))+'</span></div>';
+  let agentsHtml = '';
+  if(appr.length) agentsHtml += '<div class="pp-sect">Approved ('+appr.length+')</div><div class="pp-agents">'+appr.map(d=>agentRow(d,'appr')).join('')+'</div>';
+  if(pendList.length) agentsHtml += '<div class="pp-sect" style="margin-top:10px;">Pending ('+pendList.length+')</div><div class="pp-agents">'+pendList.map(d=>agentRow(d,'pend')).join('')+'</div>';
+  if(!appr.length && !pendList.length) agentsHtml = '<div class="pp-empty">No requests for '+escapeHtml(lob)+' on this day.<br>All '+cap+' slot'+(cap!==1?'s':'')+' open.</div>';
+
+  const admin = isAdmin();
+  const pop = getPlanPop();
+  pop.innerHTML =
+    '<div class="pp-head"><div>'
+    + '<div class="pp-title">'+escapeHtml(lob)+'</div>'
+    + '<div class="pp-date">'+fmtDate(date)+(date===TODAY_STR?' \u00b7 TODAY':'')+(isOverride?' \u00b7 DAY OVERRIDE':'')+'</div>'
+    + '</div><button class="pp-x" title="Close">\u2715</button></div>'
+    + '<div class="pp-body">'
+    + '<div class="pp-metrics">'
+    + '<div class="pp-metric"><div class="n" style="color:var(--green)">'+open+'</div><div class="k">Open</div></div>'
+    + '<div class="pp-metric"><div class="n">'+used+'/'+cap+'</div><div class="k">Approved</div></div>'
+    + '<div class="pp-metric"><div class="n" style="color:'+(pend?'var(--amber)':'var(--muted)')+'">'+pend+'</div><div class="k">Pending</div></div>'
+    + '</div>'
+    + '<div class="pp-bar"><span style="width:'+barPct+'%;background:'+(over?'var(--red)':h.bg)+'"></span></div>'
+    + '<div class="pp-bar-lbl"><span>'+(over?'OVER CAP':'Utilization')+'</span><span>'+(pct>=999?'\u221e':pct+'%')+'</span></div>'
+    + agentsHtml
+    + '<div class="pp-foot"><button id="ppFullDay">View full day</button>'
+    + (admin?'<button id="ppEditCap" style="border-color:var(--teal);color:var(--teal)">Edit cap</button>':'')
+    + '</div></div>';
+
+  positionFloat(pop, cell, 300, 300);
+  pop.classList.add('open');
+  cell.classList.add('sel');
+
+  pop.querySelector('.pp-x').onclick = closePlanInspect;
+  const full = pop.querySelector('#ppFullDay');
+  if(full) full.onclick = ()=>{ closePlanInspect(); openDrawer(date, LEAVE_DATA.filter(d=>d.date===date)); };
+  const ed = pop.querySelector('#ppEditCap');
+  if(ed) ed.onclick = ()=>{ closePlanInspect(); editCap(date, lob); };
+
+  setTimeout(()=>{
+    planInspectOutside = (ev)=>{ if(!pop.contains(ev.target) && !ev.target.closest('.plan-cell')) closePlanInspect(); };
+    document.addEventListener('click', planInspectOutside, true);
+  }, 0);
 }
 
 async function editCap(date, lob){
